@@ -1,0 +1,44 @@
+{
+  "name": "nav-strikes-reference",
+  "version": "0.1.0",
+  "description": "Reference implementation for NAV Strikes on Solana - Educational purposes only",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "demo": "ts-node src/examples/daily-strikes.ts",
+    "start": "ts-node src/examples/daily-strikes.ts",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "validator": "solana-test-validator"
+  },
+  "keywords": [
+    "solana",
+    "nav",
+    "money-market-fund",
+    "token-2022",
+    "spl-token",
+    "defi",
+    "institutional"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@solana/spl-token": "^0.4.9",
+    "@solana/spl-token-metadata": "^0.1.6",
+    "@solana/web3.js": "^1.95.4",
+    "bs58": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.1",
+    "typescript": "^5.6.3",
+    "ts-node": "^10.9.2",
+    "@typescript-eslint/eslint-plugin": "^8.14.0",
+    "@typescript-eslint/parser": "^8.14.0",
+    "eslint": "^9.14.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
