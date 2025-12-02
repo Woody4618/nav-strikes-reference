@@ -424,7 +424,7 @@ async function main() {
     "║  │   NAV Strikes/Day:    1              4                                 │  ║"
   );
   console.log(
-    "║  │   Front-running:      Possible       None (atomic)                     │  ║"
+    "║  │   Pricing:            Unknown til 4PM  Exact NAV at strike             │  ║"
   );
   console.log(
     "║  └────────────────────────────────────────────────────────────────────────┘  ║"

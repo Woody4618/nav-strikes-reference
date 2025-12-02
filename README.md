@@ -24,13 +24,13 @@ Using SPL Token 2022 features and atomic transactions, funds can offer multiple 
 
 ## Key Features
 
-| Feature            | Traditional NAV   | Solana NAV Strikes |
-| ------------------ | ----------------- | ------------------ |
-| Strike Frequency   | Once daily (4 PM) | 4+ times daily     |
-| Settlement         | T+1 or T+2        | T+0 (instant)      |
-| Processing Cost    | $50-200           | <$0.01             |
-| Front-running Risk | High              | None (atomic)      |
-| Transparency       | End-of-day        | Real-time on-chain |
+| Feature           | Traditional NAV   | Solana NAV Strikes   |
+| ----------------- | ----------------- | -------------------- |
+| Strike Frequency  | Once daily (4 PM) | 4+ times daily       |
+| Settlement        | T+1 or T+2        | T+0 (instant)        |
+| Processing Cost   | $50-200           | <$0.01               |
+| Pricing Certainty | Unknown until 4PM | Execute at exact NAV |
+| Transparency      | End-of-day        | Real-time on-chain   |
 
 ## Quick Start
 
