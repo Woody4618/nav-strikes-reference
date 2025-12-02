@@ -33,7 +33,23 @@ import {
   fetchMaybeToken,
   fetchToken,
 } from "@solana-program/token";
+import {
+  TOKEN_2022_PROGRAM_ADDRESS,
+  fetchToken as fetchToken2022,
+} from "@solana-program/token-2022";
 import type { SolanaClient } from "./types";
+
+/**
+ * Helper to send and confirm transactions with correct typing
+ * Works around stricter types in @solana/kit v5+
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sendTransaction(
+  client: SolanaClient,
+  signedTx: any
+): Promise<void> {
+  await client.sendAndConfirmTransaction(signedTx, { commitment: "confirmed" });
+}
 
 /**
  * Creates a mock USDC token for testing
@@ -79,13 +95,14 @@ export async function createTestUSDC(
     createTransactionMessage({ version: 0 }),
     (tx) => setTransactionMessageFeePayerSigner(payer, tx),
     (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
-    (tx) => appendTransactionMessageInstructions([createAccountIx, initMintIx], tx)
+    (tx) =>
+      appendTransactionMessageInstructions([createAccountIx, initMintIx], tx)
   );
 
-  const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
-  await client.sendAndConfirmTransaction(signedTransaction, {
-    commitment: "confirmed",
-  });
+  const signedTransaction = await signTransactionMessageWithSigners(
+    transactionMessage
+  );
+  await sendTransaction(client, signedTransaction);
 
   console.log(`✅ Test USDC created: ${mint.address}`);
   return mint.address;
@@ -103,8 +120,12 @@ export async function mintTestUSDC(
   recipientName?: string
 ): Promise<Address> {
   const shortAddr = `${recipient.slice(0, 4)}...${recipient.slice(-4)}`;
-  const displayName = recipientName ? `"${recipientName}" (${shortAddr})` : shortAddr;
-  console.log(`\n💵 Minting $${amount.toLocaleString()} test USDC to ${displayName}`);
+  const displayName = recipientName
+    ? `"${recipientName}" (${shortAddr})`
+    : shortAddr;
+  console.log(
+    `\n💵 Minting $${amount.toLocaleString()} test USDC to ${displayName}`
+  );
 
   // Find the ATA
   const [ata] = await findAssociatedTokenPda({
@@ -113,10 +134,14 @@ export async function mintTestUSDC(
     tokenProgram: TOKEN_PROGRAM_ADDRESS,
   });
 
-  const { value: latestBlockhash } = await client.rpc.getLatestBlockhash().send();
+  const { value: latestBlockhash } = await client.rpc
+    .getLatestBlockhash()
+    .send();
 
   // Check if account exists
-  const maybeToken = await fetchMaybeToken(client.rpc, ata, { commitment: "confirmed" });
+  const maybeToken = await fetchMaybeToken(client.rpc, ata, {
+    commitment: "confirmed",
+  });
 
   if (!maybeToken.exists) {
     // Create ATA first
@@ -135,10 +160,10 @@ export async function mintTestUSDC(
       (tx) => appendTransactionMessageInstructions([createAtaIx], tx)
     );
 
-    const signedCreateAta = await signTransactionMessageWithSigners(createAtaMsg);
-    await client.sendAndConfirmTransaction(signedCreateAta, {
-      commitment: "confirmed",
-    });
+    const signedCreateAta = await signTransactionMessageWithSigners(
+      createAtaMsg
+    );
+    await sendTransaction(client, signedCreateAta);
   }
 
   // Mint USDC
@@ -149,7 +174,9 @@ export async function mintTestUSDC(
     amount: BigInt(amount * 1e6),
   });
 
-  const { value: latestBlockhash2 } = await client.rpc.getLatestBlockhash().send();
+  const { value: latestBlockhash2 } = await client.rpc
+    .getLatestBlockhash()
+    .send();
 
   const mintMsg = pipe(
     createTransactionMessage({ version: 0 }),
@@ -159,9 +186,7 @@ export async function mintTestUSDC(
   );
 
   const signedMint = await signTransactionMessageWithSigners(mintMsg);
-  await client.sendAndConfirmTransaction(signedMint, {
-    commitment: "confirmed",
-  });
+  await sendTransaction(client, signedMint);
 
   console.log(`✅ Minted $${amount.toLocaleString()} USDC`);
 
@@ -183,7 +208,9 @@ export async function getUSDCBalance(
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
 
-    const account = await fetchToken(client.rpc, tokenAddress, { commitment: "confirmed" });
+    const account = await fetchToken(client.rpc, tokenAddress, {
+      commitment: "confirmed",
+    });
     return Number(account.data.amount) / 1e6;
   } catch {
     return 0;
@@ -198,9 +225,6 @@ export async function getFundShareBalance(
   fundMint: Address,
   owner: Address
 ): Promise<number> {
-  const { TOKEN_2022_PROGRAM_ADDRESS } = await import("@solana-program/token-2022");
-  const { fetchToken: fetchToken2022 } = await import("@solana-program/token-2022");
-  
   try {
     const [tokenAddress] = await findAssociatedTokenPda({
       mint: fundMint,
@@ -208,10 +232,11 @@ export async function getFundShareBalance(
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
-    const account = await fetchToken2022(client.rpc, tokenAddress, { commitment: "confirmed" });
+    const account = await fetchToken2022(client.rpc, tokenAddress, {
+      commitment: "confirmed",
+    });
     return Number(account.data.amount) / 1e6;
   } catch {
     return 0;
   }
 }
-

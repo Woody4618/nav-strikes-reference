@@ -15,7 +15,6 @@
 
 import {
   Address,
-  address,
   airdropFactory,
   appendTransactionMessageInstructions,
   createSolanaRpc,
@@ -30,7 +29,6 @@ import {
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
-  TransactionSigner,
   Rpc,
   RpcSubscriptions,
   SolanaRpcApi,
@@ -38,7 +36,6 @@ import {
 } from "@solana/kit";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
-  getMintSize,
   TOKEN_PROGRAM_ADDRESS,
   getApproveInstruction,
   getTransferCheckedInstruction,
@@ -46,24 +43,28 @@ import {
   getBurnInstruction,
   findAssociatedTokenPda,
   getCreateAssociatedTokenInstruction,
-  fetchToken,
-  fetchMaybeToken,
 } from "@solana-program/token";
 import {
   TOKEN_2022_PROGRAM_ADDRESS,
-  getInitializeMintInstruction as getInitializeMint2022Instruction,
+  getInitializeMintInstruction,
   getInitializeTokenMetadataInstruction,
   getUpdateTokenMetadataFieldInstruction,
   tokenMetadataField,
   getThawAccountInstruction,
   getFreezeAccountInstruction,
   AccountState,
-  fetchMint as fetchMint2022,
-  getMintSize as getMintSize2022,
+  getMintSize,
   extension,
   getPreInitializeInstructionsForMintExtensions,
-  fetchMaybeToken as fetchMaybeToken2022,
+  fetchMaybeToken,
 } from "@solana-program/token-2022";
+
+import { pack } from "@solana/spl-token-metadata";
+import { PublicKey } from "@solana/web3.js";
+
+// TLV (Type-Length-Value) sizes for Token-2022 extensions
+const TYPE_SIZE = 2;
+const LENGTH_SIZE = 2;
 
 import type {
   FundTokenConfig,
@@ -166,6 +167,18 @@ export class NAVStrikeEngine {
   }
 
   /**
+   * Helper to send and confirm transactions with correct typing
+   * Works around stricter types in @solana/kit v5+
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async sendTransaction(
+    signedTx: any,
+    commitment: "confirmed" | "finalized" = "confirmed"
+  ): Promise<void> {
+    await this.client.sendAndConfirmTransaction(signedTx, { commitment });
+  }
+
+  /**
    * Get explorer link for a transaction signature
    */
   getTxExplorerLink(signature: string): string {
@@ -218,44 +231,31 @@ export class NAVStrikeEngine {
     const extensions = [defaultAccountStateExtension, metadataPointerExtension];
 
     // Calculate mint size without metadata
-    const baseMintSize = getMintSize2022(extensions);
+    const baseMintSize = getMintSize(extensions);
 
-    // Calculate extra space for metadata (name, symbol, uri, and custom fields)
-    // We need to estimate metadata size for rent calculation
-    // Format: TLV header (4 bytes) + metadata struct
-    const metadataEstimate =
-      4 + // TLV header
-      4 +
-      config.name.length + // name
-      4 +
-      config.symbol.length + // symbol
-      4 +
-      (config.description?.length ?? 0) + // uri
-      // Additional metadata fields (key-value pairs with max sizes)
-      4 +
-      "currentNAV".length +
-      4 +
-      "999999.999999".length +
-      4 +
-      "lastStrikeTime".length +
-      4 +
-      "2099-12-31T23:59:59.999Z".length +
-      4 +
-      "strikeSchedule".length +
-      4 +
-      JSON.stringify(config.strikeSchedule).length +
-      4 +
-      "totalAUM".length +
-      4 +
-      "999999999999999.99".length +
-      4 +
-      "fundType".length +
-      4 +
-      "Money Market Fund".length +
-      500; // Extra buffer for safety
+    // Create metadata object to calculate EXACT size using pack()
+    // Note: PublicKey is only used here for size calculation, not for transaction building
+    const metadataForSizing = {
+      mint: new PublicKey(mint.address),
+      name: config.name,
+      symbol: config.symbol,
+      uri: config.description || "",
+      additionalMetadata: [
+        // Use max expected lengths for proper space allocation
+        ["currentNAV", "999999.999999"], // Max NAV format
+        ["lastStrikeTime", "2099-12-31T23:59:59.999Z"], // Max ISO timestamp
+        ["strikeSchedule", JSON.stringify(config.strikeSchedule)],
+        ["totalAUM", "999999999999999.99"], // Max AUM (quadrillions)
+        ["fundType", "Money Market Fund"],
+      ] as [string, string][],
+    };
 
-    const totalSpace = baseMintSize + metadataEstimate;
+    // Calculate exact metadata size using pack()
+    const metadataLen = pack(metadataForSizing).length;
+    // MetadataExtension TLV overhead: 2 bytes for type, 2 bytes for length
+    const metadataExtensionOverhead = TYPE_SIZE + LENGTH_SIZE;
 
+    const totalSpace = baseMintSize + metadataLen + metadataExtensionOverhead;
     // Get rent for total space
     const mintRent = await this.client.rpc
       .getMinimumBalanceForRentExemption(BigInt(totalSpace))
@@ -277,7 +277,7 @@ export class NAVStrikeEngine {
     );
 
     // Initialize mint instruction (Token 2022)
-    const initMintIx = getInitializeMint2022Instruction({
+    const initMintIx = getInitializeMintInstruction({
       mint: mint.address,
       decimals,
       mintAuthority: this.fundAdministrator.address,
@@ -343,9 +343,7 @@ export class NAVStrikeEngine {
     );
     const signature = getSignatureFromTransaction(signedTransaction);
 
-    await this.client.sendAndConfirmTransaction(signedTransaction, {
-      commitment: "confirmed",
-    });
+    await this.sendTransaction(signedTransaction);
 
     // Update internal state
     this.currentNAV = config.initialNAV;
@@ -415,9 +413,7 @@ export class NAVStrikeEngine {
     );
     const signature = getSignatureFromTransaction(signedTransaction);
 
-    await this.client.sendAndConfirmTransaction(signedTransaction, {
-      commitment: "confirmed",
-    });
+    await this.sendTransaction(signedTransaction);
 
     const navChange = ((newNAV - previousNAV) / previousNAV) * 100;
     const changeSymbol = navChange >= 0 ? "▲" : "▼";
@@ -449,7 +445,7 @@ export class NAVStrikeEngine {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
-    const maybeToken = await fetchMaybeToken2022(this.client.rpc, ata, {
+    const maybeToken = await fetchMaybeToken(this.client.rpc, ata, {
       commitment: "confirmed",
     });
 
@@ -478,9 +474,7 @@ export class NAVStrikeEngine {
       const signedCreateAta = await signTransactionMessageWithSigners(
         createAtaMsg
       );
-      await this.client.sendAndConfirmTransaction(signedCreateAta, {
-        commitment: "confirmed",
-      });
+      await this.sendTransaction(signedCreateAta);
     }
 
     // Thaw the account
@@ -498,9 +492,7 @@ export class NAVStrikeEngine {
     );
 
     const signedThaw = await signTransactionMessageWithSigners(thawMsg);
-    await this.client.sendAndConfirmTransaction(signedThaw, {
-      commitment: "confirmed",
-    });
+    await this.sendTransaction(signedThaw);
 
     console.log(`   Account: ${ata}`);
     console.log(`✅ Investor whitelisted and account thawed`);
@@ -536,9 +528,7 @@ export class NAVStrikeEngine {
     );
 
     const signedFreeze = await signTransactionMessageWithSigners(freezeMsg);
-    await this.client.sendAndConfirmTransaction(signedFreeze, {
-      commitment: "confirmed",
-    });
+    await this.sendTransaction(signedFreeze);
 
     console.log(`✅ Account frozen and removed from whitelist`);
   }
@@ -579,9 +569,7 @@ export class NAVStrikeEngine {
     );
 
     const signedApprove = await signTransactionMessageWithSigners(approveMsg);
-    await this.client.sendAndConfirmTransaction(signedApprove, {
-      commitment: "confirmed",
-    });
+    await this.sendTransaction(signedApprove);
 
     console.log(`✅ USDC delegation approved`);
   }
@@ -625,9 +613,7 @@ export class NAVStrikeEngine {
     );
 
     const signedApprove = await signTransactionMessageWithSigners(approveMsg);
-    await this.client.sendAndConfirmTransaction(signedApprove, {
-      commitment: "confirmed",
-    });
+    await this.sendTransaction(signedApprove);
 
     console.log(`✅ Share delegation approved`);
   }
@@ -706,9 +692,7 @@ export class NAVStrikeEngine {
     const signedTx = await signTransactionMessageWithSigners(txMessage);
     const signature = getSignatureFromTransaction(signedTx);
 
-    await this.client.sendAndConfirmTransaction(signedTx, {
-      commitment: "confirmed",
-    });
+    await this.sendTransaction(signedTx);
 
     // Update fund state
     this.totalAUM += usdcAmount;
@@ -800,9 +784,7 @@ export class NAVStrikeEngine {
     const signedTx = await signTransactionMessageWithSigners(txMessage);
     const signature = getSignatureFromTransaction(signedTx);
 
-    await this.client.sendAndConfirmTransaction(signedTx, {
-      commitment: "confirmed",
-    });
+    await this.sendTransaction(signedTx);
 
     // Update fund state
     this.totalAUM -= usdcToPay;
